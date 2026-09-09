@@ -1,0 +1,16 @@
+{
+  "name": "xgodev-session-digest",
+  "owner": {"name": "xgodev", "url": "https://github.com/xgodev"},
+  "metadata": {
+    "description": "Turn Claude Code session transcripts into durable, routed knowledge."
+  },
+  "plugins": [
+    {
+      "name": "session-digest",
+      "source": "./",
+      "description": "Scheduled distillation of Claude Code sessions: a deterministic Python CLI finds and condenses new sessions, and a skill judges what is worth recording and where it belongs.",
+      "category": "knowledge",
+      "tags": ["knowledge", "documentation", "obsidian", "automation", "digest"]
+    }
+  ]
+}

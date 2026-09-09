@@ -1,0 +1,6 @@
+{
+  "name": "session-digest",
+  "version": "0.1.0",
+  "description": "Distil Claude Code sessions into durable knowledge: technical learnings to the repository, project narrative to a configured knowledge base.",
+  "author": {"name": "xgodev", "url": "https://github.com/xgodev"}
+}

@@ -21,6 +21,13 @@ def test_read_watermarks_returns_empty_when_corrupt(tmp_path: Path) -> None:
     assert read_watermarks(path) == {}
 
 
+def test_read_watermarks_skips_non_numeric_values(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({"-a-b": "x"}), encoding="utf-8")
+
+    assert read_watermarks(path) == {}
+
+
 def test_watermark_for_defaults_to_zero() -> None:
     assert watermark_for({}, "-a-b") == 0.0
     assert watermark_for({"-a-b": 12.5}, "-a-b") == 12.5

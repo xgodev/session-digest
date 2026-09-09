@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path("~/.claude/session-digest.json")
+DEFAULT_PROJECTS_ROOT = Path("~/.claude/projects")
 DEFAULT_SCHEDULE = "0 23 * * *"
 DEFAULT_MIN_USER_TURNS = 3
 DEFAULT_MIN_CHARS = 2000
@@ -31,7 +32,7 @@ class Config:
     commit: bool = False
     projects: dict[str, ProjectMapping] = field(default_factory=dict)
     projects_root: Path = field(
-        default_factory=lambda: Path("~/.claude/projects").expanduser()
+        default_factory=lambda: DEFAULT_PROJECTS_ROOT.expanduser()
     )
     min_user_turns: int = DEFAULT_MIN_USER_TURNS
     min_chars: int = DEFAULT_MIN_CHARS
@@ -53,7 +54,7 @@ def load_config(path: Path | None = None) -> Config:
         raise ConfigError(f"invalid JSON in {config_path}: {exc}") from exc
 
     if not isinstance(payload, dict):
-        raise ConfigError(f"invalid JSON in {config_path}: expected an object")
+        raise ConfigError(f"{config_path}: top-level JSON value must be an object")
 
     base = payload.get("knowledge_base")
     if not base:
@@ -77,7 +78,7 @@ def load_config(path: Path | None = None) -> Config:
         projects_root=(
             _resolve(projects_root)
             if projects_root
-            else Path("~/.claude/projects").expanduser()
+            else DEFAULT_PROJECTS_ROOT.expanduser()
         ),
         min_user_turns=int(payload.get("min_user_turns", DEFAULT_MIN_USER_TURNS)),
         min_chars=int(payload.get("min_chars", DEFAULT_MIN_CHARS)),
@@ -88,12 +89,19 @@ def mapping_for(config: Config, project_dir: str) -> ProjectMapping:
     """Return the mapping for a project, deriving one when absent.
 
     Claude Code encodes a session's cwd in the directory name by replacing
-    every path separator with a dash. Without an explicit entry we read the
-    directory back as a path and use its last segment as the folder name.
+    every "/" and "." with a dash. That encoding is lossy: a literal dash
+    already present in a directory name is indistinguishable from an
+    encoded separator, so naively turning every dash back into a "/" can
+    produce a path that never existed. We still derive ``folder`` from the
+    directory name's last dash-separated segment, but we only fill in
+    ``repo`` when the naive reconstruction happens to exist as a real
+    directory on disk; otherwise ``repo`` is None. An explicit ``projects``
+    entry in the config is the reliable way to point at a repository.
     """
     explicit = config.projects.get(project_dir)
     if explicit is not None:
         return explicit
 
     as_path = Path("/" + project_dir.strip("-").replace("-", "/"))
-    return ProjectMapping(folder=as_path.name, repo=as_path)
+    repo = as_path if as_path.is_dir() else None
+    return ProjectMapping(folder=as_path.name, repo=repo)

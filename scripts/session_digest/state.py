@@ -20,7 +20,13 @@ def read_watermarks(path: Path) -> dict[str, float]:
         return {}
     if not isinstance(payload, dict):
         return {}
-    return {str(k): float(v) for k, v in payload.items()}
+    marks: dict[str, float] = {}
+    for key, value in payload.items():
+        try:
+            marks[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return marks
 
 
 def watermark_for(marks: dict[str, float], project_dir: str) -> float:

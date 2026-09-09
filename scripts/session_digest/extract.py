@@ -33,7 +33,7 @@ def condense_session(path: Path) -> str:
     Tool results are dropped: they are bulky, and what matters for a digest
     is the intent and the outcome, which the surrounding text carries.
     """
-    lines = [f"{SESSION_MARKER.strip()} {path.stem}"]
+    lines = [f"{SESSION_MARKER}{path.stem}"]
 
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         try:
@@ -92,6 +92,11 @@ def chunk(text: str, limit: int) -> list[str]:
 def extract_project(
     paths: list[Path], limit: int = DEFAULT_CHUNK_LIMIT
 ) -> list[str]:
-    """Condense every session of a project, oldest first, then chunk."""
+    """Condense every session of a project, oldest first, then chunk.
+
+    Each condensed session already starts with SESSION_MARKER, so sessions
+    are concatenated directly (no extra separator) to keep the marker intact
+    at every boundary for chunk() to split on.
+    """
     ordered = sorted(paths, key=lambda p: p.stat().st_mtime)
-    return chunk("\n".join(condense_session(p) for p in ordered), limit)
+    return chunk("".join(condense_session(p) for p in ordered), limit)

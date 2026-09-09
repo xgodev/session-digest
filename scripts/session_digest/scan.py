@@ -20,7 +20,7 @@ class SessionMetrics:
     user_turns: int
     has_edits: bool
     has_commits: bool
-    chars: int
+    size_bytes: int
 
 
 @dataclass(frozen=True)
@@ -67,29 +67,34 @@ def session_metrics(path: Path) -> SessionMetrics:
             name = block.get("name", "")
             if name in EDIT_TOOLS:
                 has_edits = True
-            command = str((block.get("input") or {}).get("command", ""))
-            if any(marker in command for marker in COMMIT_MARKERS):
-                has_commits = True
+            if name == "Bash":
+                command = str((block.get("input") or {}).get("command", ""))
+                if any(marker in command for marker in COMMIT_MARKERS):
+                    has_commits = True
 
+    stat_result = path.stat()
     return SessionMetrics(
         path=path,
-        mtime=path.stat().st_mtime,
+        mtime=stat_result.st_mtime,
         user_turns=user_turns,
         has_edits=has_edits,
         has_commits=has_commits,
-        chars=path.stat().st_size,
+        size_bytes=stat_result.st_size,
     )
 
 
 def is_substantial(
-    metrics: SessionMetrics, min_user_turns: int, min_chars: int
+    metrics: SessionMetrics, min_user_turns: int, min_bytes: int
 ) -> bool:
     """Cheap prefilter. Discards the obviously empty, never judges meaning.
 
+    ``min_bytes`` is a byte-size threshold (the session file's size on
+    disk), not a character count.
+
     A session that wrote files or committed earned a look regardless of
-    length; judging whether it is worth a note is the agent's job.
+    size; judging whether it is worth a note is the agent's job.
     """
-    if metrics.chars < min_chars:
+    if metrics.size_bytes < min_bytes:
         return False
     if metrics.has_edits or metrics.has_commits:
         return True
@@ -107,10 +112,17 @@ def scan(config: Config, marks: dict[str, float]) -> list[ProjectCandidate]:
         since = watermark_for(marks, project.name)
         sessions = []
         for session in sorted(project.glob("*.jsonl")):
-            if session.stat().st_mtime <= since:
+            try:
+                if session.stat().st_mtime <= since:
+                    continue
+                metrics = session_metrics(session)
+            except OSError:
+                # Claude Code writes into this directory live: a file
+                # listed by glob() can vanish, or otherwise become
+                # unreadable, before it is measured. Skip it rather than
+                # letting one bad file kill the scan for every project.
                 continue
-            metrics = session_metrics(session)
-            if is_substantial(metrics, config.min_user_turns, config.min_chars):
+            if is_substantial(metrics, config.min_user_turns, config.min_bytes):
                 sessions.append(metrics)
 
         if sessions:

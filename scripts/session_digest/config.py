@@ -8,7 +8,7 @@ DEFAULT_CONFIG_PATH = Path("~/.claude/session-digest.json")
 DEFAULT_PROJECTS_ROOT = Path("~/.claude/projects")
 DEFAULT_SCHEDULE = "0 23 * * *"
 DEFAULT_MIN_USER_TURNS = 3
-DEFAULT_MIN_CHARS = 2000
+DEFAULT_MIN_BYTES = 2000
 
 
 class ConfigError(Exception):
@@ -35,7 +35,7 @@ class Config:
         default_factory=lambda: DEFAULT_PROJECTS_ROOT.expanduser()
     )
     min_user_turns: int = DEFAULT_MIN_USER_TURNS
-    min_chars: int = DEFAULT_MIN_CHARS
+    min_bytes: int = DEFAULT_MIN_BYTES
 
 
 def _resolve(value: str) -> Path:
@@ -81,7 +81,7 @@ def load_config(path: Path | None = None) -> Config:
             else DEFAULT_PROJECTS_ROOT.expanduser()
         ),
         min_user_turns=int(payload.get("min_user_turns", DEFAULT_MIN_USER_TURNS)),
-        min_chars=int(payload.get("min_chars", DEFAULT_MIN_CHARS)),
+        min_bytes=int(payload.get("min_bytes", DEFAULT_MIN_BYTES)),
     )
 
 

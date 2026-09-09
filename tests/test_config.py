@@ -39,7 +39,7 @@ def test_load_config_applies_defaults(tmp_path: Path) -> None:
     assert config.projects == {}
     assert config.projects_root == Path.home() / ".claude" / "projects"
     assert config.min_user_turns == 3
-    assert config.min_chars == 2000
+    assert config.min_bytes == 2000
 
 
 def test_load_config_reads_project_mapping(tmp_path: Path) -> None:

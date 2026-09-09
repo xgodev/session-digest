@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "session-digest"
+version = "0.1.0"
+description = "Distil Claude Code sessions into durable knowledge"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+session-digest = "session_digest.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "scripts"}
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+
+[tool.pytest.ini_options]
+pythonpath = ["scripts"]
+testpaths = ["tests"]

@@ -43,6 +43,27 @@ def test_cron_to_calendar_interval_rejects_step_syntax() -> None:
         cron_to_calendar_interval("*/15 * * * *")
 
 
+def test_cron_to_calendar_interval_rejects_out_of_range_minute() -> None:
+    with pytest.raises(InstallError, match="out of range"):
+        cron_to_calendar_interval("70 9 * * *")
+
+
+def test_cron_to_calendar_interval_rejects_out_of_range_hour() -> None:
+    with pytest.raises(InstallError, match="out of range"):
+        cron_to_calendar_interval("30 25 * * *")
+
+
+def test_cron_to_calendar_interval_rejects_day_and_weekday_together() -> None:
+    with pytest.raises(InstallError, match="ANDs"):
+        cron_to_calendar_interval("0 8 15 * 1")
+
+
+def test_crontab_line_still_accepts_day_and_weekday_together() -> None:
+    assert crontab_line("0 8 15 * 1", "/usr/local/bin/session-digest") == (
+        "0 8 15 * 1 /usr/local/bin/session-digest run"
+    )
+
+
 def test_launchd_plist_is_valid_and_runs_the_executable(tmp_path: Path) -> None:
     xml = launchd_plist("dev.xgodev.session-digest", "0 23 * * *", "/usr/local/bin/session-digest", tmp_path)
 

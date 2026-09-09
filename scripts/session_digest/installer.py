@@ -5,6 +5,13 @@ from pathlib import Path
 
 LABEL = "dev.xgodev.session-digest"
 _FIELD_NAMES = ("Minute", "Hour", "Day", "Month", "Weekday")
+_FIELD_RANGES = {
+    "Minute": (0, 59),
+    "Hour": (0, 23),
+    "Day": (1, 31),
+    "Month": (1, 12),
+    "Weekday": (0, 7),
+}
 
 
 class InstallError(Exception):
@@ -23,10 +30,27 @@ def cron_to_calendar_interval(expr: str) -> dict[str, int]:
 
     launchd has no step or range syntax, so only literal values and '*'
     are accepted; anything richer is rejected loudly rather than silently
-    scheduled at the wrong time.
+    scheduled at the wrong time. Each literal field is also range-checked,
+    since launchd would otherwise silently misinterpret an out-of-range
+    value (e.g. hour 25).
+
+    POSIX cron ORs day-of-month with day-of-week when both are specified,
+    while launchd's StartCalendarInterval ANDs them, so the same
+    expression would mean two different schedules. That combination is
+    rejected rather than translated; the crontab path is unaffected.
     """
+    fields = _fields(expr)
+    day, weekday = fields[2], fields[4]
+    if day != "*" and weekday != "*":
+        raise InstallError(
+            "cron ORs day-of-month with day-of-week when both are given, "
+            "but launchd's StartCalendarInterval ANDs them, so this "
+            "expression cannot be translated as-is; use two separate "
+            "launchd entries instead"
+        )
+
     interval: dict[str, int] = {}
-    for name, value in zip(_FIELD_NAMES, _fields(expr), strict=True):
+    for name, value in zip(_FIELD_NAMES, fields, strict=True):
         if value == "*":
             continue
         if not value.isdigit():
@@ -34,7 +58,14 @@ def cron_to_calendar_interval(expr: str) -> dict[str, int]:
                 f"cron field {value!r} is not supported by launchd; "
                 "use literal values or '*'"
             )
-        interval[name] = int(value)
+        number = int(value)
+        low, high = _FIELD_RANGES[name]
+        if not (low <= number <= high):
+            raise InstallError(
+                f"cron field {name} value {number} is out of range "
+                f"({low}-{high})"
+            )
+        interval[name] = number
     return interval
 
 

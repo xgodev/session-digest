@@ -23,7 +23,16 @@ def run_lock(path: Path, stale_after: float = DEFAULT_STALE_AFTER) -> Iterator[P
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if target.is_dir() and time.time() - target.stat().st_mtime > stale_after:
-        target.rmdir()
+        try:
+            target.rmdir()
+        except OSError:
+            # Another process may have already reclaimed (and possibly
+            # re-acquired) the lock, or the stale directory may have
+            # leftover files that prevent removal. Either way, fall
+            # through to the mkdir below: it will either succeed (the
+            # directory is really gone) or raise LockBusy (someone else
+            # holds it).
+            pass
 
     try:
         target.mkdir()

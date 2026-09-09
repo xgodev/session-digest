@@ -207,7 +207,8 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
 
     project: str | None = None
-    if argv and argv[0] == "extract":
+    is_help_request = len(argv) >= 2 and argv[1] in ("-h", "--help")
+    if argv and argv[0] == "extract" and not is_help_request:
         try:
             project, argv = _split_extract_argv(argv)
         except _ExtractArgError as exc:

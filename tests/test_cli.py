@@ -4,6 +4,8 @@ import json
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 from conftest import tool_use, user_text
 from session_digest import cli
 from session_digest.cli import main
@@ -127,6 +129,27 @@ def test_extract_without_project_returns_error(capsys) -> None:
     err = capsys.readouterr().err
     assert code == 1
     assert "immediately after 'extract'" in err
+
+
+def test_extract_help_reaches_argparse(capsys) -> None:
+    """'--help' right after 'extract' is a help request, not a bad project id."""
+    with pytest.raises(SystemExit) as exc_info:
+        main(["extract", "--help"])
+
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "project" in out
+    assert "immediately after 'extract'" not in out
+
+
+def test_extract_short_help_reaches_argparse(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["extract", "-h"])
+
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "project" in out
+    assert "immediately after 'extract'" not in out
 
 
 # --- Finding 2: no exception ever escapes main() ------------------------

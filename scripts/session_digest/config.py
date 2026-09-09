@@ -6,10 +6,8 @@ from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path("~/.claude/session-digest.json")
 DEFAULT_PROJECTS_ROOT = Path("~/.claude/projects")
-DEFAULT_SCHEDULE = "0 23 * * *"
 DEFAULT_MIN_USER_TURNS = 3
 DEFAULT_MIN_BYTES = 2000
-DEFAULT_TIMEOUT = 900
 
 
 class ConfigError(Exception):
@@ -29,15 +27,12 @@ class Config:
     """Resolved configuration. All paths are absolute."""
 
     knowledge_base: Path
-    schedule: str = DEFAULT_SCHEDULE
-    commit: bool = False
     projects: dict[str, ProjectMapping] = field(default_factory=dict)
     projects_root: Path = field(
         default_factory=lambda: DEFAULT_PROJECTS_ROOT.expanduser()
     )
     min_user_turns: int = DEFAULT_MIN_USER_TURNS
     min_bytes: int = DEFAULT_MIN_BYTES
-    timeout: int = DEFAULT_TIMEOUT
 
 
 def _resolve(value: str) -> Path:
@@ -74,8 +69,6 @@ def load_config(path: Path | None = None) -> Config:
 
     return Config(
         knowledge_base=_resolve(base),
-        schedule=payload.get("schedule", DEFAULT_SCHEDULE),
-        commit=bool(payload.get("commit", False)),
         projects=projects,
         projects_root=(
             _resolve(projects_root)
@@ -84,7 +77,6 @@ def load_config(path: Path | None = None) -> Config:
         ),
         min_user_turns=int(payload.get("min_user_turns", DEFAULT_MIN_USER_TURNS)),
         min_bytes=int(payload.get("min_bytes", DEFAULT_MIN_BYTES)),
-        timeout=int(payload.get("timeout", DEFAULT_TIMEOUT)),
     )
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -9,8 +8,6 @@ import pytest
 from conftest import tool_use, user_text
 from session_digest import cli
 from session_digest.cli import main
-from session_digest.lock import LockBusy
-from session_digest.runner import DigestResult
 
 
 def prepare(tmp_path: Path, make_session) -> Path:
@@ -72,24 +69,6 @@ def test_missing_config_exits_with_message(tmp_path, capsys) -> None:
 
     assert code == 1
     assert "config not found" in capsys.readouterr().err
-
-
-def test_install_dry_run_prints_plist_without_writing(tmp_path, make_session, capsys) -> None:
-    config = prepare(tmp_path, make_session)
-
-    code = main(["install", "--config", str(config), "--dry-run", "--platform", "darwin"])
-
-    assert code == 0
-    assert "StartCalendarInterval" in capsys.readouterr().out
-
-
-def test_install_dry_run_prints_crontab_on_linux(tmp_path, make_session, capsys) -> None:
-    config = prepare(tmp_path, make_session)
-
-    code = main(["install", "--config", str(config), "--dry-run", "--platform", "linux"])
-
-    assert code == 0
-    assert "run" in capsys.readouterr().out
 
 
 # --- Finding 1: deterministic 'extract PROJECT' contract ---------------
@@ -171,95 +150,13 @@ def test_unexpected_exception_becomes_error_code_not_traceback(
     assert "permission denied" in capsys.readouterr().err
 
 
-# --- Finding 3: unambiguous exit codes for 'run' ------------------------
-
-
-def test_run_returns_busy_code_when_lock_held(tmp_path, make_session, monkeypatch, capsys) -> None:
-    config = prepare(tmp_path, make_session)
-
-    @contextmanager
-    def _busy(_path):
-        raise LockBusy(f"another run holds {_path}")
-        yield  # pragma: no cover - never reached
-
-    monkeypatch.setattr(cli, "run_lock", _busy)
-
-    code = main(["run", "--config", str(config), "--state", str(tmp_path / "s.json")])
-
-    assert code == 3
-    assert "holds" in capsys.readouterr().err
-
-
-def test_run_reads_watermarks_only_inside_the_lock(
-    tmp_path, make_session, monkeypatch, capsys
-) -> None:
-    """Watermarks must be read after the lock is held, not before: two
-    queued runs would otherwise let the second read marks the first is
-    about to advance and re-digest everything the first just finished."""
-    config = prepare(tmp_path, make_session)
-    calls: list[str] = []
-
-    @contextmanager
-    def _busy(_path):
-        calls.append("lock_attempted")
-        raise LockBusy(f"another run holds {_path}")
-        yield  # pragma: no cover - never reached
-
-    def _spy_read_watermarks(*_args, **_kwargs):
-        calls.append("read_watermarks")
-        return {}
-
-    monkeypatch.setattr(cli, "run_lock", _busy)
-    monkeypatch.setattr(cli, "read_watermarks", _spy_read_watermarks)
-
-    code = main(["run", "--config", str(config), "--state", str(tmp_path / "s.json")])
-
-    assert code == 3
-    # The lock was never acquired, so watermarks must never have been read.
-    assert calls == ["lock_attempted"]
-
-
-def test_run_returns_partial_failure_code(tmp_path, make_session, monkeypatch, capsys) -> None:
-    config = prepare(tmp_path, make_session)
-    monkeypatch.setattr(cli, "DEFAULT_LOCK_PATH", tmp_path / "lock.d")
-    monkeypatch.setattr(
-        cli,
-        "run",
-        lambda candidates, config, state: [DigestResult("-p-one", False, "boom")],
-    )
-
-    code = main(["run", "--config", str(config), "--state", str(tmp_path / "s.json")])
-
-    assert code == 2
-
-
-def test_run_prints_failure_reason(tmp_path, make_session, monkeypatch, capsys) -> None:
-    """The scheduled job's only surface is its log, so a failure's reason
-    (DigestResult.message) must reach stdout, not just an 'ok'/'failed' tag."""
-    config = prepare(tmp_path, make_session)
-    monkeypatch.setattr(cli, "DEFAULT_LOCK_PATH", tmp_path / "lock.d")
-    monkeypatch.setattr(
-        cli,
-        "run",
-        lambda candidates, config, state: [
-            DigestResult("-p-one", False, "claude invocation timed out after 900s")
-        ],
-    )
-
-    main(["run", "--config", str(config), "--state", str(tmp_path / "s.json")])
-
-    out = capsys.readouterr().out
-    assert "-p-one" in out
-    assert "claude invocation timed out after 900s" in out
-
-
-# --- Finding: usage errors must not collide with 'run's exit code 2 ----
+# --- Finding: usage errors must not collide with argparse's own exit code ---
 
 
 def test_bogus_subcommand_returns_error_not_argparse_exit_code(capsys) -> None:
-    """argparse would sys.exit(2) for an unknown subcommand; 2 is already
-    'one or more projects failed', so this must come back as 1 and must
-    not raise SystemExit out of main()."""
+    """argparse would sys.exit(2) for an unknown subcommand; this CLI
+    normalizes every usage error to 1 and must not raise SystemExit out of
+    main()."""
     code = main(["bogus"])
 
     assert code == 1
@@ -280,27 +177,3 @@ def test_top_level_help_still_exits_zero(capsys) -> None:
         main(["--help"])
 
     assert exc_info.value.code == 0
-
-
-# --- Finding 4: honest uninstall reporting ------------------------------
-
-
-def test_uninstall_reports_nothing_to_remove(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-    code = main(["uninstall", "--platform", "linux"])
-
-    assert code == 0
-    assert "nothing to remove" in capsys.readouterr().out
-
-
-def test_uninstall_reports_removed_when_present(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    target = tmp_path / ".config" / "session-digest" / "crontab.entry"
-    target.parent.mkdir(parents=True)
-    target.write_text("x", encoding="utf-8")
-
-    code = main(["uninstall", "--platform", "linux"])
-
-    assert code == 0
-    assert "removed:" in capsys.readouterr().out

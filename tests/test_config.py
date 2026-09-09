@@ -34,8 +34,6 @@ def test_load_config_applies_defaults(tmp_path: Path) -> None:
 
     config = load_config(path)
 
-    assert config.schedule == "0 23 * * *"
-    assert config.commit is False
     assert config.projects == {}
     assert config.projects_root == Path.home() / ".claude" / "projects"
     assert config.min_user_turns == 3

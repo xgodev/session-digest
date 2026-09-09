@@ -2,17 +2,14 @@
 
 Exit codes
 ----------
-Every subcommand uses this same scale, so a scheduled job can act on the
-result without inspecting stderr text:
+Every subcommand uses this same scale:
 
 =====  ======================================================================
 code   meaning
 =====  ======================================================================
 0      success, including "nothing to do"
-1      hard error: bad config, a schedule that cannot be installed, a
-       malformed invocation, or an unexpected failure
-2      the run completed but one or more projects failed
-3      another run already holds the lock (benign skip)
+1      hard error: bad config, a malformed invocation, or an unexpected
+       failure
 =====  ======================================================================
 """
 
@@ -20,25 +17,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 from pathlib import Path
 
 from .config import DEFAULT_CONFIG_PATH, ConfigError, load_config
 from .extract import extract_project
-from .installer import LABEL, InstallError, crontab_line, launchd_plist
-from .lock import LockBusy, run_lock
-from .runner import run
 from .scan import scan
 from .state import DEFAULT_STATE_PATH, read_watermarks
 
-DEFAULT_LOCK_PATH = Path("~/.claude/state/session-digest.lock.d")
-DEFAULT_LOG_DIR = Path("~/.claude/logs")
-
 EXIT_OK = 0
 EXIT_ERROR = 1
-EXIT_PARTIAL_FAILURE = 2
-EXIT_LOCK_BUSY = 3
 
 _EXTRACT_USAGE = "session-digest extract PROJECT [-h] [--config CONFIG] [--state STATE]"
 _EXTRACT_OWN_OPTIONS = {"--config", "--state", "-h", "--help"}
@@ -108,17 +96,6 @@ def _build_parser() -> argparse.ArgumentParser:
     # hand in main() via _split_extract_argv, then attached to the parsed
     # namespace below. See that function's docstring for why.
 
-    run_p = sub.add_parser("run", help="digest every pending project")
-    run_p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    run_p.add_argument("--state", type=Path, default=DEFAULT_STATE_PATH)
-
-    install_p = sub.add_parser("install", help="install the periodic job")
-    install_p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    install_p.add_argument("--dry-run", action="store_true")
-    install_p.add_argument("--platform", default=sys.platform)
-
-    uninstall_p = sub.add_parser("uninstall", help="remove the periodic job")
-    uninstall_p.add_argument("--platform", default=sys.platform)
     return parser
 
 
@@ -145,69 +122,6 @@ def _cmd_extract(config, marks, project: str) -> int:
     return EXIT_ERROR
 
 
-def _cmd_run(config, state: Path) -> int:
-    try:
-        with run_lock(DEFAULT_LOCK_PATH):
-            # Watermarks are read here, inside the lock, not before it: two
-            # runs queued back to back would otherwise let the second read
-            # marks the first is about to advance, and re-digest everything
-            # the first just finished.
-            marks = read_watermarks(state)
-            results = run(scan(config, marks), config, state)
-    except LockBusy as exc:
-        print(str(exc), file=sys.stderr)
-        return EXIT_LOCK_BUSY
-
-    for result in results:
-        if result.ok:
-            print(f"{result.project_dir}: ok")
-        else:
-            print(f"{result.project_dir}: failed ({result.message})")
-    return EXIT_OK if all(r.ok for r in results) else EXIT_PARTIAL_FAILURE
-
-
-def _executable() -> str:
-    return shutil.which("session-digest") or "session-digest"
-
-
-def _cmd_install(config, platform: str, dry_run: bool) -> int:
-    log_dir = DEFAULT_LOG_DIR.expanduser()
-    if platform == "darwin":
-        rendered = launchd_plist(LABEL, config.schedule, _executable(), log_dir)
-        target = Path(f"~/Library/LaunchAgents/{LABEL}.plist").expanduser()
-    else:
-        rendered = crontab_line(config.schedule, _executable())
-        target = Path("~/.config/session-digest/crontab.entry").expanduser()
-
-    if dry_run:
-        print(rendered)
-        return EXIT_OK
-
-    log_dir.mkdir(parents=True, exist_ok=True)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(rendered, encoding="utf-8")
-    print(f"written: {target}")
-    if platform == "darwin":
-        print(f"activate with: launchctl load {target}")
-    else:
-        print(f"activate with: (crontab -l; cat {target}) | crontab -")
-    return EXIT_OK
-
-
-def _cmd_uninstall(platform: str) -> int:
-    if platform == "darwin":
-        target = Path(f"~/Library/LaunchAgents/{LABEL}.plist").expanduser()
-        print(f"run: launchctl unload {target}")
-    else:
-        target = Path("~/.config/session-digest/crontab.entry").expanduser()
-        print("remove the session-digest line from your crontab")
-
-    existed = target.exists()
-    target.unlink(missing_ok=True)
-    print(f"removed: {target}" if existed else f"nothing to remove: {target}")
-    return EXIT_OK
-
-
 def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns a process exit code and never raises."""
     if argv is None:
@@ -226,8 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         args = _build_parser().parse_args(argv)
     except SystemExit as exc:
         # argparse exits 0 for a help request and 2 for a usage error.
-        # 0 is a real, documented outcome (let it through as-is); 2
-        # collides with this CLI's own "one or more projects failed", so a
+        # 0 is a real, documented outcome (let it through as-is); a
         # malformed invocation is remapped to this CLI's own hard-error
         # code instead.
         if exc.code == 0:
@@ -237,14 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "extract":
         args.project = project
 
-    if args.command == "uninstall":
-        return _cmd_uninstall(args.platform)
-
     try:
         config = load_config(args.config)
-
-        if args.command == "install":
-            return _cmd_install(config, args.platform, args.dry_run)
 
         if args.command == "scan":
             marks = read_watermarks(args.state.expanduser())
@@ -252,12 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "extract":
             marks = read_watermarks(args.state.expanduser())
             return _cmd_extract(config, marks, args.project)
-        if args.command == "run":
-            return _cmd_run(config, args.state.expanduser())
     except ConfigError as exc:
-        print(str(exc), file=sys.stderr)
-        return EXIT_ERROR
-    except InstallError as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_ERROR
     except Exception as exc:  # noqa: BLE001 - main() must return, never raise

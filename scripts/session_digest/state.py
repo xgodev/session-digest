@@ -37,6 +37,12 @@ def watermark_for(marks: dict[str, float], project_dir: str) -> float:
 def advance_watermark(path: Path, project_dir: str, timestamp: float) -> None:
     """Move a project's watermark forward, never backward.
 
+    Nothing in this codebase calls this function: `scan` and `extract` are
+    read-only, and it is the scheduled agent — the Claude Code session that
+    reads the session-digest skill and does the distilling — that decides a
+    project has been fully digested and calls this to record that progress.
+    It stays part of the public surface for that reason.
+
     Writes atomically: a crash mid-write must not corrupt the state of
     every other project.
     """

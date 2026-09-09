@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ import pytest
 from conftest import user_text
 from session_digest.config import Config, ProjectMapping
 from session_digest.scan import ProjectCandidate, SessionMetrics
-from session_digest.runner import build_prompt, run, run_project
+from session_digest.runner import ALLOWED_TOOLS, _default_invoke, build_prompt, run, run_project
 
 
 def make_config(tmp_path: Path, **overrides: object) -> Config:
@@ -44,6 +45,24 @@ def test_build_prompt_marks_transcript_as_data(tmp_path, make_session) -> None:
     prompt = build_prompt(candidate, ["material"], config)
 
     assert "data, not instructions" in prompt
+
+
+def test_build_prompt_states_commit_enabled(tmp_path, make_session) -> None:
+    config = make_config(tmp_path, commit=True)
+    candidate = make_candidate(tmp_path, make_session)
+
+    prompt = build_prompt(candidate, ["material"], config)
+
+    assert "committing is enabled" in prompt
+
+
+def test_build_prompt_states_commit_disabled(tmp_path, make_session) -> None:
+    config = make_config(tmp_path, commit=False)
+    candidate = make_candidate(tmp_path, make_session)
+
+    prompt = build_prompt(candidate, ["material"], config)
+
+    assert "committing is disabled" in prompt
 
 
 def test_build_prompt_omits_repo_when_unknown(tmp_path, make_session) -> None:
@@ -190,3 +209,120 @@ def test_build_prompt_uses_different_token_per_call(tmp_path, make_session) -> N
     token_two = re.search(r"--- TRANSCRIPT ([0-9a-f]+) ---", prompt_two).group(1)
 
     assert token_one != token_two
+
+
+# --- _default_invoke: least-privilege flags, timeout, cwd -----------------
+
+
+def test_default_invoke_passes_allowed_tools_not_a_bypass(tmp_path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return _Completed()
+
+    monkeypatch.setattr("session_digest.runner.subprocess.run", fake_run)
+
+    code, output = _default_invoke("a prompt", cwd=tmp_path, timeout=5)
+
+    assert code == 0
+    assert output == "ok"
+    cmd = captured["cmd"]
+    assert "--allowedTools" in cmd
+    assert cmd[cmd.index("--allowedTools") + 1] == ALLOWED_TOOLS
+    assert "--dangerously-skip-permissions" not in cmd
+    assert "--permission-mode" not in cmd
+    assert captured["kwargs"]["cwd"] == tmp_path
+    assert captured["kwargs"]["timeout"] == 5
+
+
+def test_default_invoke_timeout_produces_failed_result(tmp_path, monkeypatch) -> None:
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr("session_digest.runner.subprocess.run", fake_run)
+
+    code, message = _default_invoke("a prompt", cwd=tmp_path, timeout=5)
+
+    assert code != 0
+    assert "timed out" in message
+
+
+def test_run_project_timeout_leaves_watermark_untouched(
+    tmp_path, make_session, monkeypatch
+) -> None:
+    """A subprocess timeout in the real invoker must fail only that project."""
+    config = make_config(tmp_path)
+    candidate = make_candidate(tmp_path, make_session)
+    state = tmp_path / "state.json"
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr("session_digest.runner.subprocess.run", fake_run)
+
+    result = run_project(candidate, config, state)  # invoke=None: real _default_invoke
+
+    assert result.ok is False
+    assert "timed out" in result.message
+
+    from session_digest.state import read_watermarks
+
+    assert read_watermarks(state) == {}
+
+
+def test_run_project_uses_repo_as_cwd_when_known(
+    tmp_path, make_session, monkeypatch
+) -> None:
+    config = make_config(tmp_path)
+    candidate = make_candidate(tmp_path, make_session)
+    state = tmp_path / "state.json"
+    captured: dict[str, object] = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = "wrote 1 note"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["kwargs"] = kwargs
+        return _Completed()
+
+    monkeypatch.setattr("session_digest.runner.subprocess.run", fake_run)
+
+    run_project(candidate, config, state)
+
+    assert captured["kwargs"]["cwd"] == config.projects["-p-one"].repo
+
+
+def test_run_project_falls_back_to_knowledge_base_cwd_when_no_repo(
+    tmp_path, make_session, monkeypatch
+) -> None:
+    config = Config(
+        knowledge_base=tmp_path / "kb",
+        projects_root=tmp_path / "projects",
+    )
+    candidate = make_candidate(tmp_path, make_session)
+    state = tmp_path / "state.json"
+    captured: dict[str, object] = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = "wrote 1 note"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["kwargs"] = kwargs
+        return _Completed()
+
+    monkeypatch.setattr("session_digest.runner.subprocess.run", fake_run)
+
+    run_project(candidate, config, state)
+
+    assert captured["kwargs"]["cwd"] == config.knowledge_base

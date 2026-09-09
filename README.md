@@ -67,7 +67,8 @@ session-digest install
 ## Configuration
 
 Configuration lives at `~/.claude/session-digest.json` by default (override
-with `--config` on any subcommand). Example:
+with `--config` on `scan`, `extract`, `run`, and `install`; see
+[CLI flags](#cli-flags) below for what each subcommand accepts). Example:
 
 ```json
 {
@@ -95,6 +96,21 @@ with `--config` on any subcommand). Example:
 | `projects_root` | no | `~/.claude/projects` | Where Claude Code stores session directories. |
 | `min_user_turns` | no | `3` | A session with fewer user turns than this is dropped by the cheap filter unless it wrote a file or committed. |
 | `min_bytes` | no | `2000` | A session smaller than this many bytes on disk is dropped by the cheap filter regardless of anything else. |
+| `timeout` | no | `900` | Seconds to wait for the headless `claude` invocation on one project before giving up on it. A timeout fails that project only; its watermark is left untouched. |
+
+## CLI flags
+
+These apply across subcommands, not just to the JSON configuration above:
+
+| Flag | Default | Accepted by |
+|---|---|---|
+| `--config PATH` | `~/.claude/session-digest.json` | `scan`, `extract`, `run`, `install` |
+| `--state PATH` | `~/.claude/state/session-digest.json` | `scan`, `extract`, `run` |
+| `--platform NAME` | the running platform | `install`, `uninstall` |
+
+`uninstall` takes only `--platform`: it deletes the installed job file and
+never touches the digest configuration or watermark state, so it has no use
+for `--config` or `--state`.
 
 ## Commands
 

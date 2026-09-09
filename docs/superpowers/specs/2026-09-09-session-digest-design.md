@@ -27,7 +27,7 @@ roteado por tipo:
   encontrar.
 - **Narrativa de projeto** (linha do tempo, decisões e seu porquê, pendências,
   correções que o usuário fez) vai para a **base de conhecimento** configurada —
-  um vault Obsidian, um diretório de markdown, o que o usuário apontar.
+  um vault de notas, um diretório de markdown, o que o usuário apontar.
 
 ## Não-objetivos
 
@@ -109,7 +109,7 @@ Se o `SKILL.md` crescer, vira porta com folhas — o padrão do `dev` no
 
 ```json
 {
-  "knowledge_base": "~/Obsidian",
+  "knowledge_base": "~/notes",
   "schedule": "0 23 * * *",
   "commit": false,
   "projects": {

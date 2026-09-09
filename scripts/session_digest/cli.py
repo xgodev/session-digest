@@ -145,17 +145,24 @@ def _cmd_extract(config, marks, project: str) -> int:
     return EXIT_ERROR
 
 
-def _cmd_run(config, marks, state: Path) -> int:
+def _cmd_run(config, state: Path) -> int:
     try:
         with run_lock(DEFAULT_LOCK_PATH):
+            # Watermarks are read here, inside the lock, not before it: two
+            # runs queued back to back would otherwise let the second read
+            # marks the first is about to advance, and re-digest everything
+            # the first just finished.
+            marks = read_watermarks(state)
             results = run(scan(config, marks), config, state)
     except LockBusy as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_LOCK_BUSY
 
     for result in results:
-        status = "ok" if result.ok else "failed"
-        print(f"{result.project_dir}: {status}")
+        if result.ok:
+            print(f"{result.project_dir}: ok")
+        else:
+            print(f"{result.project_dir}: failed ({result.message})")
     return EXIT_OK if all(r.ok for r in results) else EXIT_PARTIAL_FAILURE
 
 
@@ -215,7 +222,18 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return EXIT_ERROR
 
-    args = _build_parser().parse_args(argv)
+    try:
+        args = _build_parser().parse_args(argv)
+    except SystemExit as exc:
+        # argparse exits 0 for a help request and 2 for a usage error.
+        # 0 is a real, documented outcome (let it through as-is); 2
+        # collides with this CLI's own "one or more projects failed", so a
+        # malformed invocation is remapped to this CLI's own hard-error
+        # code instead.
+        if exc.code == 0:
+            raise
+        return EXIT_ERROR
+
     if args.command == "extract":
         args.project = project
 
@@ -228,14 +246,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "install":
             return _cmd_install(config, args.platform, args.dry_run)
 
-        marks = read_watermarks(args.state.expanduser())
-
         if args.command == "scan":
+            marks = read_watermarks(args.state.expanduser())
             return _cmd_scan(config, marks)
         if args.command == "extract":
+            marks = read_watermarks(args.state.expanduser())
             return _cmd_extract(config, marks, args.project)
         if args.command == "run":
-            return _cmd_run(config, marks, args.state.expanduser())
+            return _cmd_run(config, args.state.expanduser())
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_ERROR

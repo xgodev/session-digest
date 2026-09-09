@@ -41,13 +41,14 @@ For each note a finding belongs in, follow this sequence:
 
 1. Read the note if a file for it already exists.
 2. If it exists, edit it in place: keep its frontmatter and its original
-   `criado` date exactly as they are, refresh `updated` to today's date,
-   and add the new content alongside what's already there.
+   `created` date exactly as they are (match an existing note's own key
+   for that date instead of adding a second one), refresh `updated` to
+   today's date, and add the new content alongside what's already there.
 3. Before adding an entry, check whether it is already recorded (same date
    and same headline in that note); skip it if so.
 4. If no file for it exists yet, create one from the matching file in
    `templates/`, filling in its placeholder tokens, including setting
-   `criado` to today's date. `criado` is written once, at creation, and
+   `created` to today's date. `created` is written once, at creation, and
    never edited again on any later run; `updated` is refreshed on every
    run that touches the note.
 5. Name every note by project and note kind only (as the templates are

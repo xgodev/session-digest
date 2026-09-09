@@ -1,6 +1,6 @@
 ---
 tags: [{slug}, moc]
-criado: {date}
+created: {date}
 updated: {date}
 source: claude-code-sessions
 ---

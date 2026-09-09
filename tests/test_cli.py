@@ -190,6 +190,35 @@ def test_run_returns_busy_code_when_lock_held(tmp_path, make_session, monkeypatc
     assert "holds" in capsys.readouterr().err
 
 
+def test_run_reads_watermarks_only_inside_the_lock(
+    tmp_path, make_session, monkeypatch, capsys
+) -> None:
+    """Watermarks must be read after the lock is held, not before: two
+    queued runs would otherwise let the second read marks the first is
+    about to advance and re-digest everything the first just finished."""
+    config = prepare(tmp_path, make_session)
+    calls: list[str] = []
+
+    @contextmanager
+    def _busy(_path):
+        calls.append("lock_attempted")
+        raise LockBusy(f"another run holds {_path}")
+        yield  # pragma: no cover - never reached
+
+    def _spy_read_watermarks(*_args, **_kwargs):
+        calls.append("read_watermarks")
+        return {}
+
+    monkeypatch.setattr(cli, "run_lock", _busy)
+    monkeypatch.setattr(cli, "read_watermarks", _spy_read_watermarks)
+
+    code = main(["run", "--config", str(config), "--state", str(tmp_path / "s.json")])
+
+    assert code == 3
+    # The lock was never acquired, so watermarks must never have been read.
+    assert calls == ["lock_attempted"]
+
+
 def test_run_returns_partial_failure_code(tmp_path, make_session, monkeypatch, capsys) -> None:
     config = prepare(tmp_path, make_session)
     monkeypatch.setattr(cli, "DEFAULT_LOCK_PATH", tmp_path / "lock.d")
@@ -202,6 +231,55 @@ def test_run_returns_partial_failure_code(tmp_path, make_session, monkeypatch, c
     code = main(["run", "--config", str(config), "--state", str(tmp_path / "s.json")])
 
     assert code == 2
+
+
+def test_run_prints_failure_reason(tmp_path, make_session, monkeypatch, capsys) -> None:
+    """The scheduled job's only surface is its log, so a failure's reason
+    (DigestResult.message) must reach stdout, not just an 'ok'/'failed' tag."""
+    config = prepare(tmp_path, make_session)
+    monkeypatch.setattr(cli, "DEFAULT_LOCK_PATH", tmp_path / "lock.d")
+    monkeypatch.setattr(
+        cli,
+        "run",
+        lambda candidates, config, state: [
+            DigestResult("-p-one", False, "claude invocation timed out after 900s")
+        ],
+    )
+
+    main(["run", "--config", str(config), "--state", str(tmp_path / "s.json")])
+
+    out = capsys.readouterr().out
+    assert "-p-one" in out
+    assert "claude invocation timed out after 900s" in out
+
+
+# --- Finding: usage errors must not collide with 'run's exit code 2 ----
+
+
+def test_bogus_subcommand_returns_error_not_argparse_exit_code(capsys) -> None:
+    """argparse would sys.exit(2) for an unknown subcommand; 2 is already
+    'one or more projects failed', so this must come back as 1 and must
+    not raise SystemExit out of main()."""
+    code = main(["bogus"])
+
+    assert code == 1
+    assert capsys.readouterr().err  # argparse's usage/error text
+
+
+def test_empty_argv_returns_error_not_argparse_exit_code(capsys) -> None:
+    code = main([])
+
+    assert code == 1
+    assert capsys.readouterr().err
+
+
+def test_top_level_help_still_exits_zero(capsys) -> None:
+    """A real help request keeps argparse's own exit code (0), unlike a
+    usage error, which is remapped to 1."""
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--help"])
+
+    assert exc_info.value.code == 0
 
 
 # --- Finding 4: honest uninstall reporting ------------------------------

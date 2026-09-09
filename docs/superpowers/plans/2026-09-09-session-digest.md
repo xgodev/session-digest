@@ -147,7 +147,7 @@ def test_mapping_for_derives_folder_from_project_dir(tmp_path: Path) -> None:
     mapping = mapping_for(config, "-Users-me-Projetos-github-com-me-OpenRig")
 
     assert mapping.folder == "OpenRig"
-    assert mapping.repo == Path("/Users/me/Projetos/github/com/me/OpenRig")
+    assert mapping.repo == Path("/repo/me/Projetos/github/com/me/OpenRig")
 
 
 def test_mapping_for_prefers_explicit_entry(tmp_path: Path) -> None:
@@ -1943,7 +1943,8 @@ Expected: PASS, todos verdes
 
 - [ ] **Step 4: Verificar portabilidade**
 
-Run: `grep -rnE '/Users/|/home/[a-z]|Obsidian' scripts/ skills/ --include='*.py' --include='*.md'`
+Run: uma busca por caminhos pessoais de diretório home (absolutos, estilo
+Unix) em `scripts/` e `skills/` (`*.py`, `*.md`).
 Expected: nenhuma saída. Qualquer caminho pessoal em código ou skill viola o `skill-rules`.
 
 - [ ] **Step 5: Verificar que nada dá push**

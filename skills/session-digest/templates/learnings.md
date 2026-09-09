@@ -1,5 +1,6 @@
 ---
 tags: [{slug}, learnings]
+criado: {date}
 updated: {date}
 source: claude-code-sessions
 ---

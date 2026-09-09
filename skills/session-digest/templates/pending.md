@@ -1,5 +1,6 @@
 ---
 tags: [{slug}, pending]
+criado: {date}
 updated: {date}
 source: claude-code-sessions
 ---

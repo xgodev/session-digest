@@ -1,5 +1,6 @@
 ---
 tags: [{slug}, decisions]
+criado: {date}
 updated: {date}
 source: claude-code-sessions
 ---

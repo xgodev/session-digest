@@ -25,7 +25,10 @@ destination:
   codebase" — goes to the repository's own living docs: `docs/`,
   `CLAUDE.md`, or a project skill. Before writing there, look at what the
   repository actually contains; write into what you find, don't assume a
-  file already covers it.
+  file already covers it. When that look turns up no existing home for
+  technical learnings, create `docs/learnings.md` from
+  `templates/learnings.md`; when it turns up one, edit that existing file
+  in place instead.
 - **Project narrative** — timeline entries, decisions and their reasoning,
   pending work, and user corrections — goes to the knowledge base folder
   named in the prompt.
@@ -38,19 +41,19 @@ For each note a finding belongs in, follow this sequence:
 
 1. Read the note if a file for it already exists.
 2. If it exists, edit it in place: keep its frontmatter and its original
-   `criado`/created date exactly as they are, and add the new content
-   alongside what's already there.
+   `criado` date exactly as they are, refresh `updated` to today's date,
+   and add the new content alongside what's already there.
 3. Before adding an entry, check whether it is already recorded (same date
    and same headline in that note); skip it if so.
 4. If no file for it exists yet, create one from the matching file in
-   `templates/`, filling in its placeholder tokens.
+   `templates/`, filling in its placeholder tokens, including setting
+   `criado` to today's date. `criado` is written once, at creation, and
+   never edited again on any later run; `updated` is refreshed on every
+   run that touches the note.
 5. Name every note by project and note kind only (as the templates are
    named) — never by session, date, or topic-of-the-day — so every run on
    the same project writes into the same fixed set of files instead of
    adding new ones.
-
-## Committing
-
-Never run `git push`. Create a local commit only if the prompt's
-configuration says to commit; otherwise leave the changes uncommitted for
-the user's own sync.
+6. Never run `git push`. Create a local commit only if the prompt's
+   configuration says to commit; otherwise leave the changes uncommitted
+   for the user's own sync.

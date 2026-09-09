@@ -1,5 +1,6 @@
 ---
 tags: [{slug}, corrections]
+criado: {date}
 updated: {date}
 source: claude-code-sessions
 ---

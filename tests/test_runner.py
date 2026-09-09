@@ -326,3 +326,43 @@ def test_run_project_falls_back_to_knowledge_base_cwd_when_no_repo(
     run_project(candidate, config, state)
 
     assert captured["kwargs"]["cwd"] == config.knowledge_base
+
+
+def test_run_project_creates_missing_knowledge_base_cwd_when_no_repo(
+    tmp_path, make_session, monkeypatch
+) -> None:
+    """When no repo is configured and KB dir is missing, mkdir before invoking."""
+    kb_dir = tmp_path / "missing_kb"
+    config = Config(
+        knowledge_base=kb_dir,
+        projects_root=tmp_path / "projects",
+    )
+    candidate = make_candidate(tmp_path, make_session)
+    state = tmp_path / "state.json"
+
+    # Knowledge base dir doesn't exist initially
+    assert not kb_dir.exists()
+
+    captured: dict[str, object] = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = "wrote 1 note"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["kwargs"] = kwargs
+        # Verify the cwd exists when subprocess.run is called
+        assert kwargs["cwd"].exists(), f"cwd {kwargs['cwd']} should exist"
+        return _Completed()
+
+    monkeypatch.setattr("session_digest.runner.subprocess.run", fake_run)
+
+    result = run_project(candidate, config, state)
+
+    # The invocation should succeed
+    assert result.ok is True
+    # The directory should exist now
+    assert kb_dir.exists()
+    # Verify the cwd passed to subprocess.run was the kb_dir
+    assert captured["kwargs"]["cwd"] == kb_dir

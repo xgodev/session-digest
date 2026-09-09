@@ -108,6 +108,7 @@ def run_project(
             mapping = mapping_for(config, candidate.project_dir)
             cwd = mapping.repo if mapping.repo else config.knowledge_base
             timeout = config.timeout
+            cwd.mkdir(parents=True, exist_ok=True)
             code, output = _default_invoke(prompt, cwd=cwd, timeout=timeout)
         else:
             code, output = invoke(prompt)

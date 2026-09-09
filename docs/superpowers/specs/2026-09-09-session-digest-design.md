@@ -196,3 +196,31 @@ não afeta os demais.
 - Cadência por projeto em vez de global.
 - Detecção de projeto sem entrada em `projects` e sem repo identificável.
 - Consolidação periódica: reler as notas de um projeto e compactá-las.
+
+## 2026-09-09 — Scheduling and invocation layers removed
+
+The plugin's own scheduling (`installer.py`: a launchd plist on macOS, a
+crontab entry elsewhere) and its own agent invocation (`runner.py`: build a
+prompt, shell out to `claude -p`, parse the result into `DigestResult`) were
+removed, along with `lock.py` — the directory lock that existed only to stop
+two of the plugin's own scheduled runs from colliding — and the `install`,
+`uninstall`, and `run` CLI subcommands that drove them.
+
+The reason: Claude Code gained a native local scheduled-task facility. It
+stores a task as a skill at `~/.claude/scheduled-tasks/<id>/SKILL.md` and
+runs it as a real Claude Code session on the user's machine at the chosen
+cadence. A scheduled task IS an agent session — it reads the
+`session-digest` skill directly and can call `scan` and `extract` itself.
+Every piece of machinery this plugin built to schedule itself and to invoke
+an agent by subprocess became redundant the moment that facility existed:
+redundant scheduling and invocation code in a public plugin still has to be
+maintained, documented, and trusted, for a result the platform now provides
+for free.
+
+What did not change: `scan`, `extract`, `config.py`, `state.py` (including
+`advance_watermark`, now called by the scheduled agent instead of by
+`runner.py`), and the `session-digest` skill and its templates. The
+two-stage filter this document describes — a script that discards the
+obviously empty by objective signal, an agent that judges substance — is
+still exactly how the tool works; only who schedules the agent and how it
+gets invoked changed.

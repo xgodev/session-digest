@@ -23,7 +23,7 @@ from pathlib import Path
 from .config import DEFAULT_CONFIG_PATH, ConfigError, load_config
 from .extract import extract_project
 from .scan import scan
-from .state import DEFAULT_STATE_PATH, read_watermarks
+from .state import DEFAULT_STATE_PATH, advance_watermark, read_watermarks, watermark_for
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -31,37 +31,51 @@ EXIT_ERROR = 1
 _EXTRACT_USAGE = "session-digest extract PROJECT [-h] [--config CONFIG] [--state STATE]"
 _EXTRACT_OWN_OPTIONS = {"--config", "--state", "-h", "--help"}
 
+_ADVANCE_USAGE = (
+    "session-digest advance PROJECT (TIMESTAMP | --from-scan) [-h] "
+    "[--config CONFIG] [--state STATE]"
+)
+_ADVANCE_OWN_OPTIONS = {"--config", "--state", "--from-scan", "-h", "--help"}
 
-class _ExtractArgError(Exception):
-    """Raised when 'extract' is not immediately followed by a project id."""
+# Subcommands that take a project directory name as the token immediately
+# following the subcommand name. See _split_leading_project_argv below.
+_LEADING_PROJECT_COMMANDS = ("extract", "advance")
 
 
-def _split_extract_argv(argv: list[str]) -> tuple[str, list[str]]:
-    """Pull the project id that must immediately follow 'extract' out of argv.
+class _LeadingProjectArgError(Exception):
+    """Raised when a subcommand is not immediately followed by a project id."""
+
+
+def _split_leading_project_argv(
+    argv: list[str], *, command: str, usage: str, own_options: set[str]
+) -> tuple[str, list[str]]:
+    """Pull the project id that must immediately follow `command` out of argv.
 
     Project directory names may begin with a dash (e.g.
     '-Users-me-Projetos-thing'), which collides with argparse's option
     parsing. Rather than rely on argparse to sort that out, the token
-    right after 'extract' is taken literally as the project id here,
-    before argparse ever sees it. This is the only supported position for
-    it: it must come immediately after 'extract', before any option.
+    right after the subcommand name is taken literally as the project id
+    here, before argparse ever sees it. This is the only supported
+    position for it: it must come immediately after the subcommand,
+    before any option. Shared by 'extract' and 'advance', which both take
+    a project id this way.
 
     Returns (project, remaining_argv), where remaining_argv still starts
-    with 'extract' so the rest of the CLI's own options parse normally.
-    Raises _ExtractArgError if there is no token right after 'extract',
-    or if that token is one of the CLI's own options.
+    with `command` so the rest of the CLI's own options parse normally.
+    Raises _LeadingProjectArgError if there is no token right after
+    `command`, or if that token is one of the CLI's own options.
     """
     if len(argv) < 2:
-        raise _ExtractArgError(
-            "extract: the project identifier must come immediately after "
-            f"'extract'; usage: {_EXTRACT_USAGE}"
+        raise _LeadingProjectArgError(
+            f"{command}: the project identifier must come immediately after "
+            f"'{command}'; usage: {usage}"
         )
 
     candidate = argv[1]
-    if candidate in _EXTRACT_OWN_OPTIONS or candidate.startswith("--"):
-        raise _ExtractArgError(
-            f"extract: the project identifier must come immediately after "
-            f"'extract', not an option ({candidate!r}); usage: {_EXTRACT_USAGE}"
+    if candidate in own_options or candidate.startswith("--"):
+        raise _LeadingProjectArgError(
+            f"{command}: the project identifier must come immediately after "
+            f"'{command}', not an option ({candidate!r}); usage: {usage}"
         )
 
     remaining = [argv[0], *argv[2:]]
@@ -93,8 +107,37 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     extract_p.add_argument("--state", type=Path, default=DEFAULT_STATE_PATH)
     # No 'project' positional is declared here: it is pulled out of argv by
-    # hand in main() via _split_extract_argv, then attached to the parsed
-    # namespace below. See that function's docstring for why.
+    # hand in main() via _split_leading_project_argv, then attached to the
+    # parsed namespace below. See that function's docstring for why.
+
+    advance_p = sub.add_parser(
+        "advance",
+        help="record that a project's sessions have been digested up to a timestamp",
+        description=(
+            "Move a project's watermark forward, so a future scan treats "
+            "everything up to TIMESTAMP as already digested. PROJECT is "
+            "the project directory name (it may start with a dash) and "
+            "MUST be the token immediately following 'advance', before "
+            "any option, e.g. "
+            "'session-digest advance -p-one 1737000000 --config PATH'. "
+            "TIMESTAMP is Unix epoch seconds (int or float); pass "
+            "--from-scan instead to use the newest session mtime among "
+            "the project's current scan candidates. The watermark never "
+            "moves backward: a TIMESTAMP that is not newer than what is "
+            "already recorded is reported, not applied."
+        ),
+        usage=_ADVANCE_USAGE,
+    )
+    # No 'project' positional is declared here either, for the same reason
+    # as 'extract' above. 'timestamp' IS a normal positional: unlike the
+    # project id, it never begins with a dash in practice, and rejecting a
+    # bad value with a clear message is done by hand in _cmd_advance
+    # rather than via argparse's type= (which would exit 2, not this
+    # CLI's own error code, on a bad value).
+    advance_p.add_argument("timestamp", nargs="?", default=None)
+    advance_p.add_argument("--from-scan", action="store_true")
+    advance_p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    advance_p.add_argument("--state", type=Path, default=DEFAULT_STATE_PATH)
 
     return parser
 
@@ -122,6 +165,56 @@ def _cmd_extract(config, marks, project: str) -> int:
     return EXIT_ERROR
 
 
+def _cmd_advance(config, marks, state_path: Path, project: str, args) -> int:
+    if args.timestamp is not None and args.from_scan:
+        print(
+            "advance: pass either TIMESTAMP or --from-scan, not both; "
+            f"usage: {_ADVANCE_USAGE}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if args.timestamp is None and not args.from_scan:
+        print(
+            "advance: TIMESTAMP or --from-scan is required; "
+            f"usage: {_ADVANCE_USAGE}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    if args.from_scan:
+        for candidate in scan(config, marks):
+            if candidate.project_dir == project:
+                timestamp = candidate.newest_mtime
+                break
+        else:
+            print(
+                f"advance: {project} is not among the pending scan candidates; "
+                "cannot use --from-scan",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+    else:
+        try:
+            timestamp = float(args.timestamp)
+        except ValueError:
+            print(
+                f"advance: TIMESTAMP must be a number, got {args.timestamp!r}",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+
+    previous = watermark_for(marks, project)
+    advance_watermark(state_path, project, timestamp)
+    if timestamp > previous:
+        print(f"advanced {project} watermark to {timestamp}")
+    else:
+        print(
+            f"{project} watermark already at {previous}; {timestamp} is not "
+            "newer, not advanced"
+        )
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns a process exit code and never raises."""
     if argv is None:
@@ -129,10 +222,16 @@ def main(argv: list[str] | None = None) -> int:
 
     project: str | None = None
     is_help_request = len(argv) >= 2 and argv[1] in ("-h", "--help")
-    if argv and argv[0] == "extract" and not is_help_request:
+    if argv and argv[0] in _LEADING_PROJECT_COMMANDS and not is_help_request:
+        usage = _EXTRACT_USAGE if argv[0] == "extract" else _ADVANCE_USAGE
+        own_options = (
+            _EXTRACT_OWN_OPTIONS if argv[0] == "extract" else _ADVANCE_OWN_OPTIONS
+        )
         try:
-            project, argv = _split_extract_argv(argv)
-        except _ExtractArgError as exc:
+            project, argv = _split_leading_project_argv(
+                argv, command=argv[0], usage=usage, own_options=own_options
+            )
+        except _LeadingProjectArgError as exc:
             print(str(exc), file=sys.stderr)
             return EXIT_ERROR
 
@@ -147,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
             raise
         return EXIT_ERROR
 
-    if args.command == "extract":
+    if args.command in _LEADING_PROJECT_COMMANDS:
         args.project = project
 
     try:
@@ -159,6 +258,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "extract":
             marks = read_watermarks(args.state.expanduser())
             return _cmd_extract(config, marks, args.project)
+        if args.command == "advance":
+            state_path = args.state.expanduser()
+            marks = read_watermarks(state_path)
+            return _cmd_advance(config, marks, state_path, args.project, args)
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_ERROR

@@ -8,6 +8,7 @@ import pytest
 from conftest import tool_use, user_text
 from session_digest import cli
 from session_digest.cli import main
+from session_digest.state import read_watermarks, watermark_for
 
 
 def prepare(tmp_path: Path, make_session) -> Path:
@@ -177,3 +178,146 @@ def test_top_level_help_still_exits_zero(capsys) -> None:
         main(["--help"])
 
     assert exc_info.value.code == 0
+
+
+# --- 'advance' records watermark progress -------------------------------
+
+
+def test_advance_records_timestamp(tmp_path, make_session, capsys) -> None:
+    config = prepare(tmp_path, make_session)
+    state = tmp_path / "s.json"
+
+    code = main(["advance", "-p-one", "1000", "--config", str(config), "--state", str(state)])
+
+    assert code == 0
+    assert watermark_for(read_watermarks(state), "-p-one") == 1000.0
+    assert "-p-one" in capsys.readouterr().out
+
+
+def test_advance_rejects_non_numeric_timestamp(tmp_path, make_session, capsys) -> None:
+    config = prepare(tmp_path, make_session)
+    state = tmp_path / "s.json"
+
+    code = main(
+        ["advance", "-p-one", "not-a-number", "--config", str(config), "--state", str(state)]
+    )
+
+    assert code == 1
+    assert read_watermarks(state) == {}
+    assert "must be a number" in capsys.readouterr().err
+
+
+def test_advance_reports_stale_timestamp_honestly(tmp_path, make_session, capsys) -> None:
+    config = prepare(tmp_path, make_session)
+    state = tmp_path / "s.json"
+    main(["advance", "-p-one", "1000", "--config", str(config), "--state", str(state)])
+    capsys.readouterr()
+
+    code = main(["advance", "-p-one", "500", "--config", str(config), "--state", str(state)])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert watermark_for(read_watermarks(state), "-p-one") == 1000.0
+    assert "not advanced" in out
+    assert "advanced -p-one watermark" not in out
+
+
+def test_advance_accepts_dash_prefixed_project_then_flags(
+    tmp_path, make_session, capsys
+) -> None:
+    config = prepare(tmp_path, make_session)
+    state = tmp_path / "s.json"
+
+    code = main(["advance", "-p-one", "1000", "--config", str(config), "--state", str(state)])
+
+    assert code == 0
+    assert watermark_for(read_watermarks(state), "-p-one") == 1000.0
+
+
+def test_advance_from_scan_uses_newest_mtime(tmp_path, make_session, capsys) -> None:
+    config = prepare(tmp_path, make_session)
+    state = tmp_path / "s.json"
+
+    code = main(["advance", "-p-one", "--from-scan", "--config", str(config), "--state", str(state)])
+
+    assert code == 0
+    assert watermark_for(read_watermarks(state), "-p-one") == 500.0
+
+
+def test_advance_from_scan_unknown_project_returns_error(tmp_path, make_session, capsys) -> None:
+    config = prepare(tmp_path, make_session)
+    state = tmp_path / "s.json"
+
+    code = main(
+        ["advance", "-nope", "--from-scan", "--config", str(config), "--state", str(state)]
+    )
+
+    assert code == 1
+    assert "-nope" in capsys.readouterr().err
+
+
+def test_advance_timestamp_and_from_scan_together_is_usage_error(
+    tmp_path, make_session, capsys
+) -> None:
+    config = prepare(tmp_path, make_session)
+    state = tmp_path / "s.json"
+
+    code = main(
+        [
+            "advance",
+            "-p-one",
+            "1000",
+            "--from-scan",
+            "--config",
+            str(config),
+            "--state",
+            str(state),
+        ]
+    )
+
+    assert code == 1
+    assert read_watermarks(state) == {}
+    assert "not both" in capsys.readouterr().err
+
+
+def test_advance_without_timestamp_or_from_scan_is_usage_error(
+    tmp_path, make_session, capsys
+) -> None:
+    config = prepare(tmp_path, make_session)
+    state = tmp_path / "s.json"
+
+    code = main(["advance", "-p-one", "--config", str(config), "--state", str(state)])
+
+    assert code == 1
+    assert read_watermarks(state) == {}
+    assert "--from-scan is required" in capsys.readouterr().err
+
+
+# --- 'advance' shares extract's PROJECT-placement contract --------------
+
+
+def test_advance_flags_before_project_is_rejected(tmp_path, capsys) -> None:
+    code = main(["advance", "--config", str(tmp_path / "c.json"), "-p-one", "1000"])
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "immediately after 'advance'" in err
+
+
+def test_advance_without_project_returns_error(capsys) -> None:
+    code = main(["advance"])
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "immediately after 'advance'" in err
+
+
+def test_advance_help_reaches_argparse(capsys) -> None:
+    """'--help' right after 'advance' is a help request, not a bad project id."""
+    with pytest.raises(SystemExit) as exc_info:
+        main(["advance", "--help"])
+
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "TIMESTAMP" in out
+    assert "immediately after 'advance'" not in out
